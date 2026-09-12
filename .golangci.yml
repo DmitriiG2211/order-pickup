@@ -1,0 +1,141 @@
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  default: none
+  enable:
+    # базовые
+    - govet
+    - staticcheck
+    - errcheck
+    - ineffassign
+    - unused
+    # ошибки, контекст, HTTP-клиент к 1С
+    - errorlint
+    - contextcheck
+    - noctx
+    - bodyclose
+    # архитектура и деньги
+    - depguard
+    - forbidigo
+    # надёжность
+    - gosec
+    - exhaustive
+    # читаемость
+    - revive
+    - gocritic
+    - misspell
+    - nolintlint
+    # тесты
+    - testifylint
+    - thelper
+
+  settings:
+    depguard:
+      rules:
+        # Домен — чистая логика: ни HTTP, ни JSON, ни 1С, ни соседних слоёв.
+        domain:
+          list-mode: strict
+          files:
+            - "**/internal/domain/**/*.go"
+            - "!$test"
+          allow:
+            - $gostd
+            - orderissue/internal/domain
+          deny:
+            - pkg: net/http
+              desc: "домен не знает про HTTP"
+            - pkg: encoding/json
+              desc: "домен не знает про формат ответа 1С"
+        # Сценарии работают через порты и не знают, чем они реализованы.
+        usecase:
+          list-mode: lax
+          files:
+            - "**/internal/usecase/**/*.go"
+            - "!$test"
+          deny:
+            - pkg: orderissue/internal/infrastructure
+              desc: "сценарий зависит от порта, реализация подключается в cmd/server"
+            - pkg: orderissue/internal/transport
+              desc: "сценарий не знает про транспорт"
+            - pkg: net/http
+              desc: "сценарий не знает про HTTP"
+        transport:
+          list-mode: lax
+          files:
+            - "**/internal/transport/**/*.go"
+            - "!$test"
+          deny:
+            - pkg: orderissue/internal/infrastructure
+              desc: "хендлеры вызывают сценарии, инфраструктура подключается в cmd/server"
+        infrastructure:
+          list-mode: lax
+          files:
+            - "**/internal/infrastructure/**/*.go"
+            - "!$test"
+          deny:
+            - pkg: orderissue/internal/transport
+              desc: "инфраструктура не зависит от транспорта"
+
+    forbidigo:
+      forbid:
+        - pattern: ^float(32|64)$
+          msg: "деньги и количества считаем точно через money.Decimal и money.Amount: float теряет копейки"
+
+    exhaustive:
+      default-signifies-exhaustive: true
+
+    gosec:
+      excludes:
+        - G104 # дублирует errcheck
+
+    revive:
+      rules:
+        - name: blank-imports
+        - name: context-as-argument
+        - name: context-keys-type
+        - name: dot-imports
+        - name: error-return
+        - name: error-strings
+        - name: error-naming
+        - name: errorf
+        - name: if-return
+        - name: increment-decrement
+        - name: var-declaration
+        - name: range
+        - name: receiver-naming
+        - name: time-naming
+        - name: unexported-return
+        - name: indent-error-flow
+        - name: empty-block
+        - name: superfluous-else
+        - name: unused-parameter
+        - name: unreachable-code
+        - name: redefines-builtin-id
+
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+
+  exclusions:
+    generated: lax
+    rules:
+      # float запрещаем только там, где считаются деньги и количества.
+      - path-except: internal/domain/
+        linters:
+          - forbidigo
+
+formatters:
+  enable:
+    - gofumpt
+    - goimports
+  settings:
+    # Путь модуля без точки gofumpt иначе принимает за стандартную библиотеку
+    # и спорит с goimports о группировке импортов.
+    gofumpt:
+      module-path: orderissue
+    goimports:
+      local-prefixes:
+        - orderissue
