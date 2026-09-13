@@ -1,0 +1,478 @@
+openapi: 3.0.3
+info:
+  title: Выдача заказа со склада
+  description: >
+    Тестовое задание GoShift. Сервис показывает состав заказа и остаток на складе,
+    печатает документ на выдачу и отмечает выдачу черновиком реализации в 1С.
+    Числа денег и количеств передаются на проводе как JSON-числа (не строки),
+    а считаются внутри в целых копейках без float — см. README и docs/adr.
+  version: "1.0.0"
+servers:
+  - url: /
+tags:
+  - name: orders
+    description: Список и состав заказов
+  - name: documents
+    description: Документ на выдачу — JSON и PDF
+  - name: shipment
+    description: Отметка о выдаче в 1С (черновик реализации)
+  - name: system
+    description: Здоровье сервиса и состояние связи с 1С
+
+x-problem-responses:
+  previewOK: &previewOK
+    description: Документ на выдачу.
+    content:
+      application/json:
+        schema: { $ref: "#/components/schemas/PreviewResponse" }
+  badJSON: &badJSON
+    description: Тело запроса не JSON или содержит больше одного значения.
+    content:
+      application/problem+json:
+        schema: { $ref: "#/components/schemas/Problem" }
+  badOrderRef: &badOrderRef
+    description: orderRef не похож на GUID.
+    content:
+      application/problem+json:
+        schema: { $ref: "#/components/schemas/Problem" }
+  orderNotFound: &orderNotFound
+    description: Заказа нет в 1С.
+    content:
+      application/problem+json:
+        schema: { $ref: "#/components/schemas/Problem" }
+  validationFailed: &validationFailed
+    description: Хотя бы одно поле получателя не прошло проверку.
+    content:
+      application/problem+json:
+        schema: { $ref: "#/components/schemas/Problem" }
+  upstream502: &upstream502
+    description: 1С отклонила запрос или вернула то, что не удалось разобрать.
+    content:
+      application/problem+json:
+        schema: { $ref: "#/components/schemas/Problem" }
+  upstream503: &upstream503
+    description: 1С временно недоступна, перегружена или отклонила логин/пароль.
+    content:
+      application/problem+json:
+        schema: { $ref: "#/components/schemas/Problem" }
+  upstream504: &upstream504
+    description: 1С не ответила за отведённое время.
+    content:
+      application/problem+json:
+        schema: { $ref: "#/components/schemas/Problem" }
+
+paths:
+  /healthz:
+    get:
+      tags: [system]
+      summary: Жив ли процесс
+      description: Не обращается к 1С — только сам сервис.
+      operationId: healthz
+      responses:
+        "200":
+          description: Сервис работает.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: ok }
+
+  /api/v1/status:
+    get:
+      tags: [system]
+      summary: Известное состояние связи с 1С
+      description: >
+        Не делает запрос в 1С — отдаёт последнее известное состояние клиента
+        (размыкатель, защёлка авторизации). Используется баннером на странице.
+      operationId: status
+      responses:
+        "200":
+          description: Состояние связи.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StatusResponse" }
+
+  /api/v1/orders:
+    get:
+      tags: [orders]
+      summary: Список заказов для выбора
+      operationId: listOrders
+      responses:
+        "200":
+          description: Заказы, известные 1С.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/OrderSummary" }
+        "502": *upstream502
+        "503": *upstream503
+        "504": *upstream504
+
+  /api/v1/orders/{orderRef}:
+    get:
+      tags: [orders]
+      summary: Экран заказа — строки, суммы, остаток
+      operationId: getOrder
+      parameters:
+        - $ref: "#/components/parameters/OrderRef"
+      responses:
+        "200":
+          description: Состав заказа с остатком по каждой позиции.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SheetResponse" }
+        "400": *badOrderRef
+        "404":
+          description: Такого заказа нет в 1С.
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "502": *upstream502
+        "503": *upstream503
+        "504": *upstream504
+
+  /api/v1/orders/{orderRef}/shipment-draft:
+    get:
+      tags: [shipment]
+      summary: Найден ли уже наш черновик реализации по заказу
+      operationId: findShipmentDraft
+      parameters:
+        - $ref: "#/components/parameters/OrderRef"
+      responses:
+        "200":
+          description: Черновик найден (по маркеру в комментарии, см. ADR 0004).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ShipmentDraft" }
+        "400": *badOrderRef
+        "404":
+          description: Черновика по этому заказу ещё нет.
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "502": *upstream502
+        "503": *upstream503
+        "504": *upstream504
+    put:
+      tags: [shipment]
+      summary: Создать черновик реализации или вернуть уже существующий
+      description: >
+        Идемпотентно: сколько раз ни вызвать для одного заказа, черновик
+        останется один. Поле created различает, создан он этим вызовом или
+        уже был. После создания сервис перечитывает документ из 1С и сверяет
+        его с отправленным — это и есть проверка «действительно записался».
+      operationId: ensureShipmentDraft
+      parameters:
+        - $ref: "#/components/parameters/OrderRef"
+      responses:
+        "200":
+          description: Черновик существует (создан сейчас или найден существующим).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ShipmentDraft" }
+        "400": *badOrderRef
+        "404":
+          description: Заказа нет в 1С.
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "409":
+          description: Заказ нельзя выдавать (помечен на удаление или не проведён).
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "502": *upstream502
+        "503": *upstream503
+        "504": *upstream504
+
+  /api/documents/preview:
+    post:
+      tags: [documents]
+      summary: Документ на выдачу в JSON — адрес для проверки задания
+      description: >
+        Замороженный адрес из условия задания. Ведёт себя байт в байт как
+        POST /api/v1/documents/preview — оставлен отдельно, потому что именно
+        этот путь опрашивает автопроверка.
+      operationId: previewDocumentLegacy
+      requestBody: { $ref: "#/components/requestBodies/PreviewRequest" }
+      responses:
+        "200": *previewOK
+        "400": *badJSON
+        "404": *orderNotFound
+        "422": *validationFailed
+        "502": *upstream502
+        "503": *upstream503
+        "504": *upstream504
+
+  /api/v1/documents/preview:
+    post:
+      tags: [documents]
+      summary: Документ на выдачу в JSON
+      operationId: previewDocument
+      requestBody: { $ref: "#/components/requestBodies/PreviewRequest" }
+      responses:
+        "200": *previewOK
+        "400": *badJSON
+        "404": *orderNotFound
+        "422": *validationFailed
+        "502": *upstream502
+        "503": *upstream503
+        "504": *upstream504
+
+  /api/v1/documents/pdf:
+    post:
+      tags: [documents]
+      summary: Тот же документ, текстовым PDF
+      operationId: printDocument
+      requestBody: { $ref: "#/components/requestBodies/PreviewRequest" }
+      responses:
+        "200":
+          description: Текстовый PDF (не картинка), ФИО в родительном падеже.
+          content:
+            application/pdf:
+              schema: { type: string, format: binary }
+        "400": *badJSON
+        "404": *orderNotFound
+        "409":
+          description: Заказ нельзя выдавать — печатать нечего.
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "422": *validationFailed
+        "502": *upstream502
+        "503": *upstream503
+        "504": *upstream504
+
+components:
+  parameters:
+    OrderRef:
+      name: orderRef
+      in: path
+      required: true
+      description: Ref_Key заказа в 1С (GUID), не номер документа.
+      schema: { type: string, format: uuid }
+      example: 2da145f0-d5fc-11f1-a0b3-48df371887e9
+
+  requestBodies:
+    PreviewRequest:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/DocumentRequest" }
+          example:
+            orderRef: 2da145f0-d5fc-11f1-a0b3-48df371887e9
+            customer:
+              lastName: Воронцов
+              firstName: Пётр
+              middleName: Аркадьевич
+              gender: м
+              phone: "8 (999) 123-45-67"
+              email: p.vorontsov@example.com
+
+  schemas:
+    Receiver:
+      type: object
+      required: [lastName, firstName, phone, email]
+      properties:
+        lastName: { type: string, example: Воронцов }
+        firstName: { type: string, example: Пётр }
+        middleName:
+          type: string
+          description: Не обязательно, но без него и без gender пол не определить.
+          example: Аркадьевич
+        gender:
+          type: string
+          description: "м или ж. Если не передан, определяется по отчеству."
+          enum: [м, ж]
+        phone: { type: string, example: "8 (999) 123-45-67" }
+        email: { type: string, format: email, example: p.vorontsov@example.com }
+
+    DocumentRequest:
+      type: object
+      required: [orderRef, customer]
+      properties:
+        orderRef: { type: string, format: uuid }
+        customer: { $ref: "#/components/schemas/Receiver" }
+
+    OrderSummary:
+      type: object
+      properties:
+        ref: { type: string, format: uuid }
+        number: { type: string, example: 00ДМ-000101 }
+        date: { type: string, format: date-time }
+        customer: { type: string, example: Воронцов Пётр Аркадьевич }
+        warehouse: { type: string, example: Центральный склад }
+        status: { type: string, example: КОтгрузке }
+        issuable:
+          type: boolean
+          description: false — заказ помечен на удаление или не проведён.
+        blockReasons:
+          type: array
+          items: { type: string, enum: [deletion_mark, not_posted] }
+
+    Line:
+      type: object
+      description: >
+        Числа денег и количества — JSON-числа, а не строки (см. описание сервиса).
+        Внутри считаются в целых копейках без float; на проводе видна только
+        уже посчитанная и округлённая величина.
+      properties:
+        article: { type: string, example: ДМ-0001 }
+        name: { type: string, example: "Бумага офисная А4, 500 листов" }
+        qty: { type: number, example: 3 }
+        price: { type: number, example: 1250 }
+        vatName: { type: string, example: "22%" }
+        amount: { type: number, example: 3750 }
+        vatAmount: { type: number, example: 825 }
+        amountWithVat: { type: number, example: 4575 }
+
+    Totals:
+      type: object
+      properties:
+        amount: { type: number, example: 21181 }
+        vatAmount: { type: number, example: 3210.82 }
+        amountWithVat: { type: number, example: 24391.82 }
+
+    PreviewResponse:
+      type: object
+      description: >
+        Поля сверяются по имени (customer/order/lines/totals), лишние поля —
+        issuable и blockReasons — не мешают. Это контракт из условия задания.
+      properties:
+        customer:
+          type: object
+          properties:
+            fullNameGenitive: { type: string, example: Воронцова Петра Аркадьевича }
+            phone: { type: string, example: "+79991234567" }
+            email: { type: string, example: p.vorontsov@example.com }
+        order:
+          type: object
+          properties:
+            number: { type: string, example: 00ДМ-000101 }
+            date: { type: string, format: date-time, example: "2026-08-03T09:14:27" }
+            warehouse: { type: string, example: Центральный склад }
+            priceIncludesVat: { type: boolean, example: false }
+        lines:
+          type: array
+          items: { $ref: "#/components/schemas/Line" }
+        totals: { $ref: "#/components/schemas/Totals" }
+        issuable: { type: boolean }
+        blockReasons:
+          type: array
+          items: { type: string }
+
+    Stock:
+      type: object
+      description: Наличие на складе заказа — не «доступно к выдаче» (ADR 0003).
+      properties:
+        onHand: { type: number, description: Физически лежит на складе заказа. }
+        needed: { type: number, description: Нужно по всем строкам заказа с этим товаром. }
+        shortage: { type: number, description: "max(0, needed − onHand)." }
+        reservedByOthers: { type: number, description: Обещано другим документам на этом складе. }
+
+    SheetLine:
+      allOf:
+        - $ref: "#/components/schemas/Line"
+        - type: object
+          properties:
+            stock: { $ref: "#/components/schemas/Stock" }
+
+    SheetResponse:
+      type: object
+      properties:
+        order:
+          type: object
+          properties:
+            number: { type: string }
+            date: { type: string, format: date-time }
+            warehouse: { type: string }
+            priceIncludesVat: { type: boolean }
+        customer: { type: string, example: Воронцов Пётр Аркадьевич }
+        lines:
+          type: array
+          items: { $ref: "#/components/schemas/SheetLine" }
+        totals: { $ref: "#/components/schemas/Totals" }
+        issuable: { type: boolean }
+        blockReasons:
+          type: array
+          items: { type: string }
+        suggestedReceiver:
+          type: object
+          description: Из карточки клиента-физлица, если наименование разбирается на ФИО.
+          properties:
+            lastName: { type: string }
+            firstName: { type: string }
+            middleName: { type: string }
+            gender: { type: string, enum: [м, ж] }
+
+    ShipmentDraft:
+      type: object
+      properties:
+        ref: { type: string, format: uuid, description: "Ref_Key черновика, выданный 1С." }
+        number: { type: string, example: 00УТ-000200 }
+        date: { type: string, format: date-time }
+        created:
+          type: boolean
+          description: true — создан этим вызовом; false — уже существовал.
+
+    StatusResponse:
+      type: object
+      properties:
+        state:
+          type: string
+          enum: [ok, degraded, unavailable, auth_rejected, account_locked]
+        retryAfterSeconds: { type: integer }
+        lastError: { type: string }
+
+    Problem:
+      type: object
+      description: RFC 9457 (application/problem+json).
+      properties:
+        status: { type: integer, example: 503 }
+        code:
+          type: string
+          example: ONEC_UNAVAILABLE
+          enum:
+            - INVALID_JSON
+            - INVALID_ORDER_REF
+            - VALIDATION_FAILED
+            - ORDER_NOT_FOUND
+            - ORDER_NOT_ISSUABLE
+            - SHIPMENT_DRAFT_NOT_FOUND
+            - SHIPMENT_REJECTED
+            - SHIPMENT_NOT_CONFIRMED
+            - ONEC_DATA_INCONSISTENT
+            - ONEC_TIMEOUT
+            - ONEC_UNAVAILABLE
+            - ONEC_RATE_LIMITED
+            - ONEC_CIRCUIT_OPEN
+            - ONEC_NETWORK
+            - ONEC_AUTH_REJECTED
+            - ONEC_ACCOUNT_LOCKED
+            - ONEC_REQUEST_REJECTED
+            - ONEC_PAGINATION_STUCK
+            - ONEC_BAD_RESPONSE
+            - INTERNAL
+        title: { type: string }
+        detail: { type: string }
+        operation:
+          type: string
+          description: Что делали, когда 1С отказала — по-русски.
+        attempts: { type: integer }
+        retryAfterSeconds: { type: integer }
+        upstream:
+          type: object
+          description: Что именно ответила 1С — без разбора логов.
+          properties:
+            status: { type: integer }
+            message: { type: string }
+        errors:
+          type: object
+          description: Ошибка ввода по полям — какое поле не прошло, а не общее «ошибка».
+          additionalProperties: { type: string }
+          example: { phone: "Нужно 11 цифр...", email: "Нет символа «@»" }
+        mismatches:
+          type: array
+          items: { type: string }
