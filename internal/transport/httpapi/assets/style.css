@@ -1,0 +1,190 @@
+/* Токены в духе shadcn/ui: нейтральная база (zinc), один спокойный акцент
+   для интерактивных элементов, hsl(var(--x)) как у самого shadcn — чтобы
+   оттенок можно было менять правкой одной переменной. Тулчейн React/Tailwind
+   не тянем: это HTML/CSS/JS без сборки (ADR 0001), поэтому воспроизводим
+   только словарь токенов и анатомию компонентов, а не сам shadcn как код. */
+:root{
+  --background:0 0% 100%;
+  --foreground:240 10% 4%;
+  --card:0 0% 100%;
+  --card-foreground:240 10% 4%;
+  --muted:240 5% 96%;
+  --muted-foreground:240 4% 46%;
+  --border:240 6% 90%;
+  --input:240 6% 88%;
+  --ring:240 5% 34%;
+  --primary:240 6% 10%;
+  --primary-foreground:0 0% 98%;
+  --secondary:240 5% 96%;
+  --secondary-foreground:240 6% 10%;
+  --brand:243 75% 59%;
+  --brand-foreground:0 0% 100%;
+  --destructive:0 72% 51%;
+  --destructive-foreground:0 0% 98%;
+  --destructive-bg:0 86% 97%;
+  --success:152 60% 30%;
+  --success-foreground:0 0% 100%;
+  --success-bg:152 60% 96%;
+  --warning:38 92% 40%;
+  --warning-bg:48 96% 94%;
+  --radius:0.625rem;
+}
+
+*,*::before,*::after{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{
+  margin:0;min-width:320px;
+  font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+  color:hsl(var(--foreground));
+  background:hsl(var(--muted));
+  -webkit-font-smoothing:antialiased;
+}
+main{max-width:1180px;margin:0 auto;padding:40px 24px 64px}
+
+/* ---------- header ---------- */
+.topbar{display:flex;align-items:flex-start;justify-content:space-between;gap:24px;margin-bottom:28px;flex-wrap:wrap}
+.brand{display:flex;align-items:center;gap:14px}
+.brand-mark{
+  display:grid;place-items:center;width:44px;height:44px;flex:none;
+  border-radius:var(--radius);
+  background:hsl(var(--brand));color:hsl(var(--brand-foreground));
+  font-size:1.3rem;font-weight:600;
+}
+.eyebrow{margin:0 0 2px;color:hsl(var(--brand));font-size:.72rem;font-weight:600;letter-spacing:.08em;text-transform:uppercase}
+h1{margin:0;letter-spacing:-.02em;font-size:1.55rem;line-height:1.2;font-weight:650}
+.lede{margin:4px 0 0;color:hsl(var(--muted-foreground));font-size:.9rem}
+
+/* ---------- stepper ---------- */
+/* Три состояния — upcoming/active/done — переключаются классами из app.js;
+   вся анимация (переход цвета, всплывающая галочка, заливка соединителя)
+   живёт здесь, в CSS, а JS только объявляет, какой сейчас этап. */
+.stepper{
+  list-style:none;display:flex;align-items:flex-start;gap:0;
+  margin:0 0 24px;padding:20px 22px;
+  background:hsl(var(--card));border:1px solid hsl(var(--border));border-radius:var(--radius);
+  box-shadow:0 1px 2px hsl(240 5% 10% / .04);
+}
+.stepper-item{display:flex;align-items:center;gap:11px;flex:none}
+.stepper-connector{flex:1 1 auto;align-self:center;height:2px;margin:0 14px;min-width:24px;position:relative;background:hsl(var(--border));border-radius:2px;overflow:hidden}
+.stepper-connector::after{
+  content:"";position:absolute;inset:0;width:0%;
+  background:hsl(var(--success));
+  transition:width .45s cubic-bezier(.4,0,.2,1);
+}
+.stepper-connector.is-filled::after{width:100%}
+
+.stepper-dot{
+  position:relative;display:grid;place-items:center;width:30px;height:30px;flex:none;
+  border-radius:50%;border:1.5px solid hsl(var(--border));
+  background:hsl(var(--card));color:hsl(var(--muted-foreground));
+  font-size:.8rem;font-weight:650;
+  transition:background-color .25s ease,border-color .25s ease,color .25s ease,transform .25s ease;
+}
+.stepper-number,.stepper-check{grid-area:1/1;transition:opacity .2s ease,transform .25s cubic-bezier(.34,1.56,.64,1)}
+.stepper-check{width:16px;height:16px;opacity:0;transform:scale(.4)}
+.stepper-number{opacity:1;transform:scale(1)}
+
+.stepper-text{display:flex;flex-direction:column;line-height:1.25}
+.stepper-label{font-size:.86rem;font-weight:600;color:hsl(var(--foreground))}
+.stepper-caption{font-size:.74rem;color:hsl(var(--muted-foreground))}
+
+.stepper-item.is-active .stepper-dot{
+  border-color:hsl(var(--brand));background:hsl(var(--brand));color:hsl(var(--brand-foreground));
+  animation:stepper-pulse 1.8s ease-out infinite;
+}
+.stepper-item.is-done .stepper-dot{border-color:hsl(var(--success));background:hsl(var(--success));color:hsl(var(--success-foreground))}
+.stepper-item.is-done .stepper-number{opacity:0;transform:scale(.5)}
+.stepper-item.is-done .stepper-check{opacity:1;transform:scale(1)}
+.stepper-item.is-upcoming .stepper-label,.stepper-item.is-upcoming .stepper-caption{color:hsl(var(--muted-foreground))}
+@keyframes stepper-pulse{
+  0%{box-shadow:0 0 0 0 hsl(var(--brand)/.35)}
+  70%{box-shadow:0 0 0 7px hsl(var(--brand)/0)}
+  100%{box-shadow:0 0 0 0 hsl(var(--brand)/0)}
+}
+@media (prefers-reduced-motion:reduce){
+  .stepper-dot,.stepper-number,.stepper-check,.stepper-connector::after{transition:none}
+  .stepper-item.is-active .stepper-dot{animation:none}
+}
+
+/* ---------- cards ---------- */
+.panel{
+  position:relative;background:hsl(var(--card));
+  border:1px solid hsl(var(--border));border-radius:var(--radius);
+  padding:24px;margin:0 0 18px;
+  box-shadow:0 1px 2px hsl(240 5% 10% / .04);
+}
+.section-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:18px}
+h2{margin:0;letter-spacing:-.01em;font-size:1.05rem;font-weight:650}
+.muted{margin:4px 0 0;color:hsl(var(--muted-foreground));font-size:.86rem}
+.hint{color:hsl(var(--muted-foreground));font-size:.82rem;margin:13px 0 0}
+.hint.blocked{color:hsl(var(--destructive));font-weight:600}
+
+/* ---------- form controls ---------- */
+label{display:grid;gap:7px;max-width:640px;font-size:.84rem;font-weight:600}
+select,input{
+  width:100%;height:36px;font:inherit;font-size:.875rem;color:hsl(var(--foreground));
+  padding:0 12px;border:1px solid hsl(var(--input));border-radius:calc(var(--radius) - 4px);
+  background:hsl(var(--card));outline:none;
+  transition:border-color .15s,box-shadow .15s;
+}
+select{max-width:640px;cursor:pointer}
+select:focus-visible,input:focus-visible{border-color:hsl(var(--ring));box-shadow:0 0 0 3px hsl(var(--ring)/.18)}
+input.invalid{border-color:hsl(var(--destructive));background:hsl(var(--destructive-bg))}
+input.invalid:focus-visible{box-shadow:0 0 0 3px hsl(var(--destructive)/.18)}
+.fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:16px}
+.field-error{min-height:1.15em;color:hsl(var(--destructive));font-size:.78rem;font-weight:500}
+
+/* ---------- table ---------- */
+.table-wrap{overflow:auto;border:1px solid hsl(var(--border));border-radius:calc(var(--radius) - 4px)}
+table{width:100%;min-width:920px;border-collapse:collapse;font-size:.86rem}
+th,td{border-bottom:1px solid hsl(var(--border));padding:11px 12px;text-align:right;white-space:nowrap}
+th:nth-child(2),td:nth-child(2),th:first-child,td:first-child{text-align:left}
+th{
+  background:hsl(var(--muted));color:hsl(var(--muted-foreground));
+  font-size:.72rem;font-weight:600;letter-spacing:.04em;text-transform:uppercase;
+}
+tbody tr{transition:background-color .12s}
+tbody tr:hover{background:hsl(var(--muted)/.6)}
+tfoot{font-weight:650;background:hsl(var(--muted))}
+tfoot td{border-bottom:0}
+
+/* ---------- button ---------- */
+button{
+  display:inline-flex;align-items:center;gap:8px;
+  height:38px;padding:0 18px;margin-top:20px;
+  font:inherit;font-size:.875rem;font-weight:600;
+  color:hsl(var(--primary-foreground));background:hsl(var(--primary));
+  border:0;border-radius:calc(var(--radius) - 4px);
+  cursor:pointer;transition:background-color .15s,transform .1s,opacity .15s;
+}
+button:hover:not([disabled]){background:hsl(var(--primary)/.88)}
+button:focus-visible{outline:2px solid hsl(var(--ring));outline-offset:2px}
+button:active:not([disabled]){transform:translateY(1px)}
+button.loading{cursor:wait}
+button.loading::before{
+  content:"";display:inline-block;width:.85em;height:.85em;
+  border:2px solid hsl(var(--primary-foreground)/.35);border-top-color:hsl(var(--primary-foreground));
+  border-radius:50%;animation:spin .7s linear infinite;
+}
+@keyframes spin{to{transform:rotate(360deg)}}
+button[disabled],select[disabled]{opacity:.5;cursor:not-allowed}
+
+/* ---------- inline states ---------- */
+.error{color:hsl(var(--destructive));font-weight:600}
+.success{color:hsl(var(--success));font-weight:600}
+.warning{color:hsl(var(--warning));font-weight:600}
+
+/* ---------- responsive ---------- */
+@media (max-width:760px){
+  main{padding:24px 14px 44px}
+  .stepper{padding:16px 14px;gap:0;overflow-x:auto}
+  .stepper-caption{display:none}
+  .stepper-connector{min-width:16px;margin:0 8px}
+  .panel{padding:18px}
+  .section-heading{display:block}
+  th,td{padding:9px 10px;font-size:.8rem}
+}
+@media (max-width:520px){
+  .topbar{display:block}
+  .fields{grid-template-columns:1fr}
+}
